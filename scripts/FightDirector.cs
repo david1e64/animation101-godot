@@ -77,6 +77,12 @@ public partial class FightDirector : Node
     private Tween _yanivCritTween, _orCritTween;
     private bool  _yanivInCrit = false, _orInCrit = false;
 
+    // Background atmosphere
+    private CPUParticles2D _bgMotes;
+
+    // Aura override guard (stops idle-aura from cancelling tension/special)
+    private double _yanivAuraGuard = 0.0, _orAuraGuard = 0.0;
+
     // Ground shadows (drop circles under characters)
     private Polygon2D _yanivShadow, _orShadow;
 
@@ -127,6 +133,7 @@ public partial class FightDirector : Node
         _ConfigureSparks();
         _ConfigureDebris();
         _ConfigureDust();
+        _BuildBgMotes();
         _BuildGroundGrid();
         _BuildGroundShadows();
         _BuildHorizonPulse();
@@ -276,9 +283,13 @@ public partial class FightDirector : Node
         _UpdateCritFlash(_yaniv, _yanivHP, ref _yanivInCrit, ref _yanivCritTween);
         _UpdateCritFlash(_or,    _orHP,    ref _orInCrit,    ref _orCritTween);
 
-        // HP-adaptive aura color (idle characters only)
-        _UpdateIdleAura(_yaniv);
-        _UpdateIdleAura(_or);
+        // Tick aura guards
+        _yanivAuraGuard = Mathf.Max(0.0, _yanivAuraGuard - delta);
+        _orAuraGuard    = Mathf.Max(0.0, _orAuraGuard    - delta);
+
+        // HP-adaptive aura color (idle characters only, skip if guard active)
+        if (_yanivAuraGuard <= 0) _UpdateIdleAura(_yaniv);
+        if (_orAuraGuard    <= 0) _UpdateIdleAura(_or);
 
         if (Recording) _SaveFrame();
     }
@@ -319,9 +330,8 @@ public partial class FightDirector : Node
         switch (beat.Action)
         {
             case "tension":
-                // Power aura pulse from the character — no movement
+                // Power aura pulse — no character animation
                 _SpawnShockwave(actor.Position + new Vector2(0, -70));
-                actor.SetAuraIntensity(0.5f, new Color(0.8f, 0.5f, 1.0f));
                 _vigTarget     = Mathf.Max(_vigTarget, 1.2f);
                 _camZoomTarget = Mathf.Min(_camZoomTarget + 0.04f, 1.22f);
                 break;
@@ -394,6 +404,8 @@ public partial class FightDirector : Node
                 actor.FlashPower();
                 actor.StartChargeGlow(new Color(1.4f, 1.2f, 0.3f));
                 actor.SetAuraIntensity(0.85f, new Color(1.0f, 0.85f, 0.2f));
+                if (beat.Actor == "yaniv") _yanivAuraGuard = 1.5;
+                else                       _orAuraGuard    = 1.5;
                 _camTarget      = actor.Position with { Y = 290f };
                 _camZoomTarget  = 1.35f;
                 _vigTarget      = 1.5f;
@@ -443,6 +455,7 @@ public partial class FightDirector : Node
                 actor.SetAuraIntensity(0.6f, new Color(1.0f, 0.9f, 0.3f));
                 _ShowFightText($"{beat.Actor.ToUpper()} WINS!", new Color(1f, 0.85f, 0.1f), 3.5);
                 _ScheduleFightEndFade(5.5);
+                _VictorySpectacular(actor);
                 break;
         }
     }
@@ -687,6 +700,44 @@ void fragment() {
         var tw = CreateTween();
         tw.TweenProperty(_flashRect, "color:a", 1.0f, 2.5f)
             .SetTrans(Tween.TransitionType.Sine);
+    }
+
+    private void _VictorySpectacular(Character winner)
+    {
+        var pos = winner.Position + new Vector2(0, -70);
+        var tw  = CreateTween();
+        for (int i = 0; i < 5; i++)
+        {
+            tw.TweenCallback(Callable.From(() =>
+            {
+                _SpawnShockwave(pos);
+                _TriggerFlash(new Color(1f, 0.88f, 0.15f, 0.30f), 0.09);
+            }));
+            tw.TweenInterval(0.38f);
+        }
+    }
+
+    private void _BuildBgMotes()
+    {
+        _bgMotes = new CPUParticles2D();
+        _bgMotes.Position              = new Vector2(480f, 200f);
+        _bgMotes.Amount                = 14;
+        _bgMotes.Lifetime              = 8.0f;
+        _bgMotes.OneShot               = false;
+        _bgMotes.Explosiveness         = 0.0f;
+        _bgMotes.Randomness            = 1.0f;
+        _bgMotes.EmissionShape         = CPUParticles2D.EmissionShapeEnum.Rectangle;
+        _bgMotes.EmissionRectExtents   = new Vector2(520f, 160f);
+        _bgMotes.Direction             = new Vector2(0, -1);
+        _bgMotes.Spread                = 25f;
+        _bgMotes.Gravity               = Vector2.Zero;
+        _bgMotes.InitialVelocityMin    = 4f;
+        _bgMotes.InitialVelocityMax    = 14f;
+        _bgMotes.ScaleAmountMin        = 1.0f;
+        _bgMotes.ScaleAmountMax        = 3.5f;
+        _bgMotes.Color                 = new Color(0.55f, 0.45f, 0.85f, 0.12f);
+        _bgMotes.Emitting              = true;
+        _worldRoot.AddChild(_bgMotes);
     }
 
     private void _SpawnDust(Vector2 pos)

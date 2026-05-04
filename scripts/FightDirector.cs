@@ -61,6 +61,16 @@ public partial class FightDirector : Node
     // HP bar styling (color gradient)
     private StyleBoxFlat _yanivHPStyle, _orHPStyle;
 
+    // Parallax layers
+    private Polygon2D _mountainBack, _mountainFront;
+
+    // Dust / landing particles
+    private CPUParticles2D _dustParticles;
+
+    // Critical HP flash tweens (stored to avoid double-create)
+    private Tween _yanivCritTween, _orCritTween;
+    private bool  _yanivInCrit = false, _orInCrit = false;
+
     // Ground shadows (drop circles under characters)
     private Polygon2D _yanivShadow, _orShadow;
 
@@ -90,11 +100,13 @@ public partial class FightDirector : Node
         _afterimages = GetNode<Node2D>("WorldRoot/Afterimages");
         _speedLines  = GetNode<Node2D>("WorldRoot/SpeedLines");
         _groundLines = GetNode<Node2D>("WorldRoot/GroundLines");
-        _stars       = GetNode<Node2D>("WorldRoot/Stars");
-        _vigRect     = GetNode<ColorRect>("VignetteLayer/Vignette");
-        _chromaRect  = GetNode<ColorRect>("ChromaLayer/Chroma");
-        _fightText   = GetNode<Label>("HUD/FightText");
-        _horizonGlow = GetNode<ColorRect>("WorldRoot/HorizonGlow");
+        _stars         = GetNode<Node2D>("WorldRoot/Stars");
+        _vigRect       = GetNode<ColorRect>("VignetteLayer/Vignette");
+        _chromaRect    = GetNode<ColorRect>("ChromaLayer/Chroma");
+        _fightText     = GetNode<Label>("HUD/FightText");
+        _horizonGlow   = GetNode<ColorRect>("WorldRoot/HorizonGlow");
+        _mountainBack  = GetNode<Polygon2D>("WorldRoot/MountainBack");
+        _mountainFront = GetNode<Polygon2D>("WorldRoot/MountainFront");
 
         _flashRect.Visible = false;
         _camera.Position   = _camTarget;
@@ -105,6 +117,7 @@ public partial class FightDirector : Node
         _BuildStarfield();
         _ConfigureSparks();
         _ConfigureDebris();
+        _ConfigureDust();
         _BuildGroundGrid();
         _BuildGroundShadows();
         _BuildHorizonPulse();
@@ -191,6 +204,11 @@ public partial class FightDirector : Node
         float z = Mathf.Lerp(_camera.Zoom.X, _camZoomTarget, (float)(delta * 3.5f));
         _camera.Zoom = new Vector2(z, z);
 
+        // Parallax — mountains shift opposite to camera
+        float camOff = _camera.Position.X - 480f;
+        _mountainBack.Position  = new Vector2(-camOff * 0.12f, 0f);
+        _mountainFront.Position = new Vector2(-camOff * 0.24f, 0f);
+
         // Ghosts
         if (_tick % 2 == 0)
         {
@@ -243,6 +261,14 @@ public partial class FightDirector : Node
         // HP bar color gradient: green → yellow → red
         _yanivHPStyle.BgColor = _HPColor(_yanivVisHP / 100f);
         _orHPStyle.BgColor    = _HPColor(_orVisHP    / 100f);
+
+        // Critical HP flash loop (< 25 HP)
+        _UpdateCritFlash(_yaniv, _yanivHP, ref _yanivInCrit, ref _yanivCritTween);
+        _UpdateCritFlash(_or,    _orHP,    ref _orInCrit,    ref _orCritTween);
+
+        // HP-adaptive aura color (idle characters only)
+        _UpdateIdleAura(_yaniv);
+        _UpdateIdleAura(_or);
 
         if (Recording) _SaveFrame();
     }
@@ -303,6 +329,7 @@ public partial class FightDirector : Node
                 if (beat.Actor == "yaniv") _yanivGhosts = 10;
                 else                       _orGhosts    = 10;
                 _BuildSpeedLines(actor);
+                _SpawnDust(actor.Position + new Vector2(0, 10));
                 _camTarget = new Vector2(mid.X, 290f);
                 break;
 
@@ -323,6 +350,7 @@ public partial class FightDirector : Node
 
             case "hit":
                 actor.FlashDamage();
+                _SpawnDust(actor.Position + new Vector2(0, 10));
                 _camZoomTarget = 1.08f;
                 break;
 
@@ -597,6 +625,41 @@ void fragment() {
         _chromaRect.Material = _chromaMat;
     }
 
+    private void _SpawnDust(Vector2 pos)
+    {
+        _dustParticles.GlobalPosition = pos;
+        _dustParticles.Restart();
+    }
+
+    private void _UpdateCritFlash(Character ch, ProgressBar bar, ref bool inCrit, ref Tween critTw)
+    {
+        bool nowCrit = ch.HP > 0 && ch.HP < 25;
+        if (nowCrit && !inCrit)
+        {
+            inCrit = true;
+            critTw?.Kill();
+            critTw = CreateTween().SetLoops();
+            critTw.TweenProperty(bar, "modulate:a", 0.45f, 0.35f)
+                .SetTrans(Tween.TransitionType.Sine);
+            critTw.TweenProperty(bar, "modulate:a", 1.0f, 0.35f)
+                .SetTrans(Tween.TransitionType.Sine);
+        }
+        else if (!nowCrit && inCrit)
+        {
+            inCrit = false;
+            critTw?.Kill();
+            bar.Modulate = Colors.White;
+        }
+    }
+
+    private static void _UpdateIdleAura(Character ch)
+    {
+        if (ch.CurrentAnim != "idle") return;
+        float ratio = ch.HP / 100.0f;
+        var   color = Color.FromHsv(ratio * 0.55f, 0.85f, 1.0f);
+        ch.SetAuraIntensity(Mathf.Lerp(0.05f, 0.0f, ratio), color);
+    }
+
     private void _SetupHPBarStyles()
     {
         _yanivHPStyle = new StyleBoxFlat { BgColor = new Color(0.2f, 0.85f, 0.25f) };
@@ -691,6 +754,28 @@ void fragment() {
                 ));
             }
         }
+    }
+
+    private void _ConfigureDust()
+    {
+        _dustParticles = new CPUParticles2D();
+        _dustParticles.Amount               = 12;
+        _dustParticles.Lifetime             = 0.5f;
+        _dustParticles.OneShot              = true;
+        _dustParticles.Explosiveness        = 0.7f;
+        _dustParticles.Randomness           = 0.85f;
+        _dustParticles.EmissionShape        = CPUParticles2D.EmissionShapeEnum.Sphere;
+        _dustParticles.EmissionSphereRadius = 18f;
+        _dustParticles.Direction            = new Vector2(0, -1);
+        _dustParticles.Spread               = 75f;
+        _dustParticles.Gravity              = new Vector2(0, 180f);
+        _dustParticles.InitialVelocityMin   = 15f;
+        _dustParticles.InitialVelocityMax   = 55f;
+        _dustParticles.ScaleAmountMin       = 2f;
+        _dustParticles.ScaleAmountMax       = 7f;
+        _dustParticles.Color                = new Color(0.72f, 0.68f, 0.78f, 0.55f);
+        _dustParticles.Emitting             = false;
+        _worldRoot.AddChild(_dustParticles);
     }
 
     private void _ConfigureDebris()

@@ -38,6 +38,9 @@ public partial class Character : Node2D
     // Charge glow
     private Tween _chargeTween;
 
+    // Idle breathing
+    private float _breathTime = 0.0f;
+
     public override void _Ready()
     {
         Sprite = GetNode<AnimatedSprite2D>("Sprite");
@@ -169,5 +172,17 @@ public partial class Character : Node2D
     public override void _Process(double delta)
     {
         Sprite.Scale = new Vector2(FaceRight ? Scale2D : -Scale2D, Scale2D);
+
+        // Idle breathing — subtle vertical oscillation
+        if (_currentAnim is "idle" or "victory")
+        {
+            _breathTime += (float)delta * 1.6f;
+            Sprite.Position = new Vector2(0, Mathf.Sin(_breathTime) * 2.5f);
+        }
+        else
+        {
+            _breathTime = 0.0f;
+            Sprite.Position = Vector2.Zero;
+        }
     }
 }

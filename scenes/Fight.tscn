@@ -53,8 +53,8 @@ color = Color(0.04, 0.025, 0.11, 1)
 position = Vector2(215, 313)
 script = ExtResource("2")
 character_name = "yaniv"
-frame_size = 96
-scale_2d = 2
+frame_size = 64
+scale_2d = 3
 face_right = true
 
 [node name="Sprite" type="AnimatedSprite2D" parent="WorldRoot/Yaniv"]
@@ -63,8 +63,8 @@ face_right = true
 position = Vector2(745, 313)
 script = ExtResource("2")
 character_name = "or"
-frame_size = 96
-scale_2d = 2
+frame_size = 64
+scale_2d = 3
 face_right = false
 
 [node name="Sprite" type="AnimatedSprite2D" parent="WorldRoot/Or"]

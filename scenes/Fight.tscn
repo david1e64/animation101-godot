@@ -1,0 +1,110 @@
+[gd_scene load_steps=4 format=3 uid="uid://fight"]
+
+[ext_resource type="Script" path="res://scripts/FightDirector.cs" id="1"]
+[ext_resource type="Script" path="res://scripts/Character.cs" id="2"]
+
+[node name="Fight" type="Node2D"]
+script = ExtResource("1")
+recording = false
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(480, 290)
+zoom = Vector2(1, 1)
+anchor_mode = 1
+position_smoothing_enabled = true
+position_smoothing_speed = 8.0
+
+[node name="WorldRoot" type="Node2D" parent="."]
+
+[node name="Sky" type="ColorRect" parent="WorldRoot"]
+offset_right = 960.0
+offset_bottom = 540.0
+color = Color(0.04, 0.02, 0.10, 1)
+
+[node name="Stars" type="Node2D" parent="WorldRoot"]
+
+[node name="MountainBack" type="Polygon2D" parent="WorldRoot"]
+color = Color(0.09, 0.05, 0.20, 1)
+polygon = PackedVector2Array(0, 540, 0, 270, 75, 238, 140, 258, 205, 212, 268, 244, 338, 192, 420, 220, 480, 178, 540, 208, 618, 182, 682, 218, 750, 193, 825, 242, 892, 228, 960, 260, 960, 540)
+
+[node name="MountainFront" type="Polygon2D" parent="WorldRoot"]
+color = Color(0.07, 0.04, 0.16, 1)
+polygon = PackedVector2Array(0, 540, 0, 300, 55, 284, 115, 298, 175, 278, 240, 295, 305, 272, 375, 290, 440, 268, 480, 278, 520, 265, 585, 282, 650, 268, 718, 288, 780, 270, 848, 290, 915, 278, 960, 292, 960, 540)
+
+[node name="HorizonGlow" type="ColorRect" parent="WorldRoot"]
+offset_top = 306.0
+offset_right = 960.0
+offset_bottom = 318.0
+color = Color(0.28, 0.82, 0.90, 0.65)
+
+[node name="Ground" type="ColorRect" parent="WorldRoot"]
+offset_top = 318.0
+offset_right = 960.0
+offset_bottom = 540.0
+color = Color(0.04, 0.025, 0.11, 1)
+
+[node name="GroundLines" type="Node2D" parent="WorldRoot"]
+
+[node name="Afterimages" type="Node2D" parent="WorldRoot"]
+
+[node name="SpeedLines" type="Node2D" parent="WorldRoot"]
+
+[node name="Yaniv" type="Node2D" parent="WorldRoot"]
+position = Vector2(215, 313)
+script = ExtResource("2")
+character_name = "yaniv"
+frame_size = 96
+scale_2d = 2
+face_right = true
+
+[node name="Sprite" type="AnimatedSprite2D" parent="WorldRoot/Yaniv"]
+
+[node name="Or" type="Node2D" parent="WorldRoot"]
+position = Vector2(745, 313)
+script = ExtResource("2")
+character_name = "or"
+frame_size = 96
+scale_2d = 2
+face_right = false
+
+[node name="Sprite" type="AnimatedSprite2D" parent="WorldRoot/Or"]
+
+[node name="HitSparks" type="CPUParticles2D" parent="WorldRoot"]
+emitting = false
+
+[node name="FlashRect" type="ColorRect" parent="."]
+offset_right = 960.0
+offset_bottom = 540.0
+color = Color(1, 1, 1, 0)
+visible = false
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="YanivHP" type="ProgressBar" parent="HUD"]
+offset_left = 18.0
+offset_top = 12.0
+offset_right = 355.0
+offset_bottom = 30.0
+value = 100
+max_value = 100
+show_percentage = false
+
+[node name="OrHP" type="ProgressBar" parent="HUD"]
+offset_left = 605.0
+offset_top = 12.0
+offset_right = 942.0
+offset_bottom = 30.0
+value = 100
+max_value = 100
+show_percentage = false
+fill_mode = 3
+
+[node name="YanivName" type="Label" parent="HUD"]
+offset_left = 18.0
+offset_top = 0.0
+text = "YANIV"
+
+[node name="OrName" type="Label" parent="HUD"]
+offset_left = 885.0
+offset_top = 0.0
+text = "OR"

@@ -1,0 +1,19 @@
+# Godot editor cache — auto-regenerated on first open, do NOT commit
+.godot/
+
+# C# build artifacts
+bin/
+obj/
+.vs/
+.mono/
+*.user
+
+# Generated output — frames and MP4s are products, not source
+output/frames/
+output/*.mp4
+output/*.webm
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini

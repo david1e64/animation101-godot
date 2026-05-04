@@ -2,52 +2,37 @@ using Godot;
 using System.Collections.Generic;
 
 /// <summary>
-/// Reads a Universal LPC spritesheet (64x64 px per frame).
-///
-/// Standard LPC layout — 4 direction sub-rows per animation block (N/W/S/E):
-///   Block 0  rows  0- 3  Spellcast   7 frames
-///   Block 1  rows  4- 7  Thrust      8 frames
-///   Block 2  rows  8-11  Walk        9 frames
-///   Block 3  rows 12-15  Slash       6 frames
-///   Block 4  rows 16-19  Shoot      13 frames
-///   Row 20              Hurt         6 frames  (South-only)
-///   Row 21              Death        6 frames  (South-only)
-///
-/// East direction = sub-row 3 (character faces right, profile view).
-/// We use East for all directional anims; FaceRight flips the sprite for left.
-/// If your sheet has different row counts, adjust AnimDefs below.
+/// DBZ-format spritesheet (96x96 px per frame, 8 animation rows).
+/// Row order: idle=0 walk=1 attack=2 hit=3 special=4 victory=5 death=6 dash=7
 /// </summary>
 public partial class Character : Node2D
 {
 	[Export] public string CharacterName = "yaniv";
-	[Export] public int    FrameSize     = 64;   // LPC standard
-	[Export] public int    Scale2D       = 3;    // 64×3 = 192px on screen
+	[Export] public int    FrameSize     = 96;
+	[Export] public int    Scale2D       = 2;
 	[Export] public bool   FaceRight     = true;
 
 	public int HP { get; private set; } = 100;
 	public AnimatedSprite2D Sprite { get; private set; }
 
-	// ── LPC animation rows ────────────────────────────────────────────────
-	// East-facing (base_row + 3) for combat anims; Hurt/Death are South-only.
-	// Tweak row numbers here if your downloaded sheet differs.
 	private static readonly Dictionary<string, (int row, int frames, float fps)> AnimDefs = new()
 	{
-		{ "idle",    (10, 1,  4f)  }, // Walk South row 10, 1 frame — static stand
-		{ "walk",    (11, 9,  12f) }, // Walk East  row 11, 9 frames
-		{ "attack",  (15, 6,  14f) }, // Slash East row 15, 6 frames
-		{ "hit",     (20, 6,  12f) }, // Hurt       row 20, 6 frames (South-only)
-		{ "special", (3,  7,  13f) }, // Spellcast East row 3, 7 frames
-		{ "dash",    (7,  8,  20f) }, // Thrust East row 7, 8 frames
-		{ "death",   (21, 6,  10f) }, // Death      row 21, 6 frames (South-only)
-		{ "victory", (3,  7,  5f)  }, // Spellcast East slow — triumphant hold
+		{ "idle",    (0, 8,  8f)  },
+		{ "walk",    (1, 8,  12f) },
+		{ "attack",  (2, 8,  14f) },
+		{ "hit",     (3, 4,  12f) },
+		{ "special", (4, 10, 14f) },
+		{ "victory", (5, 8,  8f)  },
+		{ "death",   (6, 8,  10f) },
+		{ "dash",    (7, 6,  18f) },
 	};
 
 	private static readonly HashSet<string> OneShot =
 		new() { "attack", "hit", "special", "dash" };
 
 	private string _currentAnim = "idle";
-	public  string CurrentAnim => _currentAnim;
-	public  bool   AnimDone    { get; private set; }
+	public  string CurrentAnim  => _currentAnim;
+	public  bool   AnimDone     { get; private set; }
 
 	public override void _Ready()
 	{
@@ -85,6 +70,8 @@ public partial class Character : Node2D
 		Sprite.SpriteFrames = frames;
 	}
 
+	// ── Playback ────────────────────────────────────────────────────────────
+
 	public void Play(string anim)
 	{
 		if (_currentAnim == anim && Sprite.IsPlaying()) return;
@@ -94,6 +81,32 @@ public partial class Character : Node2D
 	}
 
 	public void SetHP(int hp) => HP = Mathf.Clamp(hp, 0, 100);
+
+	// ── Visual feedback ──────────────────────────────────────────────────────
+
+	// Red flash when taking damage
+	public void FlashDamage()
+	{
+		Sprite.SelfModulate = new Color(2f, 0.2f, 0.2f, 1f);
+		var tw = CreateTween();
+		tw.TweenProperty(Sprite, "self_modulate", Colors.White, 0.22f);
+	}
+
+	// Bright yellow-white flash on power-up / special charge
+	public void FlashPower()
+	{
+		Sprite.SelfModulate = new Color(2f, 1.8f, 0.2f, 1f);
+		var tw = CreateTween();
+		tw.TweenProperty(Sprite, "self_modulate", Colors.White, 0.4f);
+	}
+
+	// Brief white flash (attack impact on attacker)
+	public void FlashAttack()
+	{
+		Sprite.SelfModulate = new Color(2f, 2f, 2f, 1f);
+		var tw = CreateTween();
+		tw.TweenProperty(Sprite, "self_modulate", Colors.White, 0.10f);
+	}
 
 	private void _OnAnimFinished()
 	{

@@ -13,6 +13,11 @@ public partial class FightDirector : Node
     private ProgressBar    _yanivHP, _orHP;
     private CPUParticles2D _hitSparks;
     private Node2D         _afterimages, _speedLines, _groundLines, _stars;
+    private ColorRect      _vigRect, _chromaRect;
+    private Label          _fightText;
+
+    // Shader materials
+    private ShaderMaterial _vigMat, _chromaMat;
 
     // Fight state
     private double     _elapsed = 0.0;
@@ -34,31 +39,48 @@ public partial class FightDirector : Node
     private int _yanivGhosts = 0, _orGhosts = 0, _tick = 0;
     private readonly List<(Sprite2D s, double life, double max)> _ghosts = new();
 
+    // Slow-mo & hit freeze
+    private double _timeMult       = 1.0;
+    private double _timeMultTarget = 1.0;
+    private bool   _frozen         = false;
+    private double _freezeTimer    = 0.0;
+
+    // Vignette & chroma
+    private float _vigTarget      = 0.8f;
+    private float _vigStrength    = 0.8f;
+    private float _chromaStrength = 0.0f;
+    private float _chromaTarget   = 0.0f;
+
     // Recording
     private int  _frameNum = 0;
     private bool _encDone  = false;
     private const string FRAMES_DIR    = "output/frames";
-    private const double FIGHT_DURATION = 28.0;
+    private const double FIGHT_DURATION = 40.0;
     private const int    FPS            = 60;
 
     public override void _Ready()
     {
-        _yaniv      = GetNode<Character>("WorldRoot/Yaniv");
-        _or         = GetNode<Character>("WorldRoot/Or");
-        _camera     = GetNode<Camera2D>("Camera2D");
-        _worldRoot  = GetNode<Node2D>("WorldRoot");
-        _flashRect  = GetNode<ColorRect>("FlashRect");
-        _yanivHP    = GetNode<ProgressBar>("HUD/YanivHP");
-        _orHP       = GetNode<ProgressBar>("HUD/OrHP");
-        _hitSparks  = GetNode<CPUParticles2D>("WorldRoot/HitSparks");
+        _yaniv       = GetNode<Character>("WorldRoot/Yaniv");
+        _or          = GetNode<Character>("WorldRoot/Or");
+        _camera      = GetNode<Camera2D>("Camera2D");
+        _worldRoot   = GetNode<Node2D>("WorldRoot");
+        _flashRect   = GetNode<ColorRect>("FlashRect");
+        _yanivHP     = GetNode<ProgressBar>("HUD/YanivHP");
+        _orHP        = GetNode<ProgressBar>("HUD/OrHP");
+        _hitSparks   = GetNode<CPUParticles2D>("WorldRoot/HitSparks");
         _afterimages = GetNode<Node2D>("WorldRoot/Afterimages");
         _speedLines  = GetNode<Node2D>("WorldRoot/SpeedLines");
         _groundLines = GetNode<Node2D>("WorldRoot/GroundLines");
         _stars       = GetNode<Node2D>("WorldRoot/Stars");
+        _vigRect     = GetNode<ColorRect>("VignetteLayer/Vignette");
+        _chromaRect  = GetNode<ColorRect>("ChromaLayer/Chroma");
+        _fightText   = GetNode<Label>("HUD/FightText");
 
         _flashRect.Visible = false;
         _camera.Position   = _camTarget;
 
+        _SetupVignette();
+        _SetupChroma();
         _BuildStarfield();
         _ConfigureSparks();
         _BuildGroundGrid();
@@ -69,8 +91,10 @@ public partial class FightDirector : Node
         {
             DirAccess.MakeDirRecursiveAbsolute(FRAMES_DIR);
             Engine.MaxFps = FPS;
-            GD.Print($"Recording {(int)(FIGHT_DURATION * FPS)} frames → {FRAMES_DIR}");
         }
+
+        GetTree().CreateTimer(0.4).Timeout += () =>
+            _ShowFightText("FIGHT!", new Color(1f, 0.85f, 0.1f), 1.2);
     }
 
     public override void _Process(double delta)
@@ -81,51 +105,79 @@ public partial class FightDirector : Node
             return;
         }
 
+        // Hit freeze — hold sprites, advance timer with real delta
+        if (_frozen)
+        {
+            _freezeTimer -= delta;
+            _yaniv.Sprite.SpeedScale = 0f;
+            _or.Sprite.SpeedScale    = 0f;
+            if (_freezeTimer <= 0)
+            {
+                _frozen = false;
+                _yaniv.Sprite.SpeedScale = (float)_timeMult;
+                _or.Sprite.SpeedScale    = (float)_timeMult;
+            }
+            else return;
+        }
+
         _elapsed += delta;
         _tick++;
+
+        // Lerp slow-mo
+        _timeMult = Mathf.Lerp(_timeMult, _timeMultTarget, delta * 4.0);
+        _yaniv.Sprite.SpeedScale = (float)_timeMult;
+        _or.Sprite.SpeedScale    = (float)_timeMult;
+
+        double eff = delta * _timeMult;
 
         // Fire scripted beats
         while (_cursor < _beats.Count && _beats[_cursor].Time <= _elapsed)
             _FireBeat(_beats[_cursor++]);
 
-        // Dynamic facing — always look at each other
+        // Dynamic facing
         if (Mathf.Abs(_yaniv.Position.X - _or.Position.X) > 8f)
         {
             _yaniv.FaceRight = _yaniv.Position.X < _or.Position.X;
             _or.FaceRight    = _or.Position.X    < _yaniv.Position.X;
         }
 
-        // Flash fade-out
+        // Flash fade
         if (_flashTimer > 0)
         {
-            _flashTimer -= delta;
+            _flashTimer -= eff;
             float t = Mathf.Clamp((float)(_flashTimer / _flashDuration), 0f, 1f);
             _flashRect.Color = _flashColor with { A = _flashColor.A * t };
             if (_flashTimer <= 0) _flashRect.Visible = false;
         }
 
-        // World shake (damped)
+        // World shake
         if (_shakeTimer > 0)
         {
-            _shakeTimer -= delta;
+            _shakeTimer -= eff;
             float s = (float)(_shakeStrength * Mathf.Clamp(_shakeTimer / 0.3, 0, 1));
             _worldRoot.Position = new Vector2(
                 (float)GD.RandRange(-s, s), (float)GD.RandRange(-s, s));
         }
         else _worldRoot.Position = Vector2.Zero;
 
-        // Camera smooth follow + zoom
+        // Camera
         _camera.Position = _camera.Position.Lerp(_camTarget, (float)(delta * 5.5f));
         float z = Mathf.Lerp(_camera.Zoom.X, _camZoomTarget, (float)(delta * 3.5f));
         _camera.Zoom = new Vector2(z, z);
 
-        // Spawn afterimage ghosts every 2 ticks while dashing/specials
+        // Ghosts
         if (_tick % 2 == 0)
         {
             if (_yanivGhosts > 0) { _yanivGhosts--; _SpawnGhost(_yaniv); }
             if (_orGhosts    > 0) { _orGhosts--;    _SpawnGhost(_or);    }
         }
-        _TickGhosts(delta);
+        _TickGhosts(eff);
+
+        // Shader lerps
+        _vigStrength    = Mathf.Lerp(_vigStrength,    _vigTarget,    (float)(delta * 3.5f));
+        _chromaStrength = Mathf.Lerp(_chromaStrength, _chromaTarget, (float)(delta * 5.0f));
+        _vigMat.SetShaderParameter("strength", _vigStrength);
+        _chromaMat.SetShaderParameter("strength", _chromaStrength);
 
         // HUD
         _yanivHP.Value = _yaniv.HP;
@@ -144,10 +196,16 @@ public partial class FightDirector : Node
         if (beat.Action != "move")
             actor.Play(beat.Action);
 
+        // HP: "hit"/"death" damage the actor; everything else damages the target
         if (beat.TargetHP >= 0)
-            target.SetHP(beat.TargetHP);
+        {
+            if (beat.Action == "hit" || beat.Action == "death")
+                actor.SetHP(beat.TargetHP);
+            else
+                target.SetHP(beat.TargetHP);
+        }
 
-        // Movement tween
+        // Movement tween (always moves actor)
         if (!float.IsNaN(beat.TargetX))
         {
             var tw = CreateTween();
@@ -163,13 +221,17 @@ public partial class FightDirector : Node
         switch (beat.Action)
         {
             case "walk":
-                _camZoomTarget = 1.0f;
-                _camTarget     = new Vector2(mid.X, 290f);
+                _camZoomTarget  = 1.0f;
+                _camTarget      = new Vector2(mid.X, 290f);
+                _vigTarget      = 0.8f;
+                _timeMultTarget = 1.0;
                 break;
 
             case "idle":
-                _camZoomTarget = Mathf.Lerp(_camZoomTarget, 1.0f, 0.15f);
-                _camTarget     = _camTarget.Lerp(new Vector2(mid.X, 290f), 0.15f);
+                _camZoomTarget  = Mathf.Lerp(_camZoomTarget, 1.0f, 0.15f);
+                _camTarget      = _camTarget.Lerp(new Vector2(mid.X, 290f), 0.15f);
+                _vigTarget      = Mathf.Lerp(_vigTarget, 0.8f, 0.2f);
+                _timeMultTarget = 1.0;
                 break;
 
             case "dash":
@@ -180,47 +242,80 @@ public partial class FightDirector : Node
                 break;
 
             case "attack":
-                _TriggerFlash(new Color(0.9f, 0.95f, 1.0f, 0.55f), 0.07);
+            {
+                var pos = target.Position + new Vector2(0, -80);
+                _TriggerFlash(new Color(0.9f, 0.95f, 1.0f, 0.50f), 0.07);
                 _TriggerShake(5, 0.15);
-                _SpawnSparks(target.Position + new Vector2(0, -80));
+                _TriggerFreeze(0.06);
+                _SpawnSparks(pos);
+                _SpawnImpactBurst(pos);
+                actor.FlashAttack();
                 _camTarget     = new Vector2(mid.X, 290f);
                 _camZoomTarget = 1.12f;
+                _vigTarget     = 1.0f;
                 break;
+            }
 
             case "hit":
-                // Knockback — push target away from attacker
-                float dir = beat.Actor == "yaniv" ? 1f : -1f;
-                float kbX = Mathf.Clamp(target.Position.X + dir * 38, 120, 840);
-                var   kb  = CreateTween();
-                kb.SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.Out);
-                kb.TweenProperty(target, "position:x", kbX, 0.10f);
+                actor.FlashDamage();
                 _camZoomTarget = 1.08f;
                 break;
 
             case "special":
+            {
+                var pos = target.Position + new Vector2(0, -80);
                 if (beat.Actor == "yaniv") _yanivGhosts = 18;
                 else                       _orGhosts    = 18;
                 _TriggerFlash(new Color(0.35f, 0.70f, 1.0f, 0.75f), 0.15);
-                _TriggerShake(15, 0.30);
-                _SpawnSparks(target.Position + new Vector2(0, -80));
+                _TriggerShake(14, 0.30);
+                _TriggerFreeze(0.08);
+                _SpawnSparks(pos);
+                _SpawnImpactBurst(pos);
+                _SpawnShockwave(actor.Position + new Vector2(0, -70));
                 _BuildSpeedLines(actor);
-                _camTarget     = actor.Position with { Y = 290f };
-                _camZoomTarget = 1.35f;
+                actor.FlashPower();
+                _camTarget      = actor.Position with { Y = 290f };
+                _camZoomTarget  = 1.35f;
+                _vigTarget      = 1.5f;
+                _timeMultTarget = 0.42;
+                _ScheduleSlowMoEnd(1.1);
                 break;
+            }
 
             case "death":
+            {
+                var pos = actor.Position + new Vector2(0, -80);
                 _TriggerFlash(new Color(1f, 0.18f, 0.18f, 0.88f), 0.22);
                 _TriggerShake(24, 0.5);
-                _SpawnSparks(target.Position + new Vector2(0, -80));
-                _camTarget     = target.Position with { Y = 290f };
-                _camZoomTarget = 1.55f;
+                _TriggerFreeze(0.10);
+                _SpawnSparks(pos);
+                _SpawnImpactBurst(pos);
+                _SpawnShockwave(pos);
+                actor.FlashDamage();
+                _camTarget      = actor.Position with { Y = 290f };
+                _camZoomTarget  = 1.55f;
+                _vigTarget      = 2.0f;
+                _chromaTarget   = 0.022f;
+                _timeMultTarget = 0.22;
+                _ScheduleSlowMoEnd(2.8);
+                _ShowFightText("K.O.!", new Color(1f, 0.15f, 0.15f), 2.5);
                 break;
+            }
 
             case "victory":
                 _camTarget     = actor.Position with { Y = 290f };
                 _camZoomTarget = 1.28f;
+                _vigTarget     = 0.9f;
+                _chromaTarget  = 0.0f;
+                actor.FlashPower();
                 break;
         }
+    }
+
+    private async void _ScheduleSlowMoEnd(double delay)
+    {
+        await ToSignal(GetTree().CreateTimer(delay), SceneTreeTimer.SignalName.Timeout);
+        _timeMultTarget = 1.0;
     }
 
     // ── Visual effects ───────────────────────────────────────────────────────
@@ -240,10 +335,90 @@ public partial class FightDirector : Node
         _shakeTimer    = dur;
     }
 
+    private void _TriggerFreeze(double dur)
+    {
+        _frozen      = true;
+        _freezeTimer = dur;
+    }
+
     private void _SpawnSparks(Vector2 pos)
     {
         _hitSparks.GlobalPosition = pos;
         _hitSparks.Restart();
+    }
+
+    private void _SpawnImpactBurst(Vector2 pos)
+    {
+        const int spikes = 12;
+        var burst = new Node2D();
+        burst.Position = pos;
+        _worldRoot.AddChild(burst);
+
+        for (int i = 0; i < spikes; i++)
+        {
+            float angle = i * Mathf.Tau / spikes + (float)GD.RandRange(-0.22, 0.22);
+            float len   = (float)GD.RandRange(16, 52);
+            var   line  = new Line2D();
+            line.AddPoint(Vector2.Zero);
+            line.AddPoint(new Vector2(Mathf.Cos(angle) * len, Mathf.Sin(angle) * len));
+            line.Width        = (float)GD.RandRange(1.5, 4.0);
+            line.DefaultColor = GD.Randf() > 0.5f
+                ? new Color(1.0f, 0.80f, 0.2f, 0.95f)
+                : new Color(1.0f, 1.0f,  1.0f, 0.95f);
+            burst.AddChild(line);
+        }
+
+        var tw = CreateTween();
+        tw.SetParallel(true);
+        tw.TweenProperty(burst, "scale", new Vector2(2.4f, 2.4f), 0.18f)
+            .SetTrans(Tween.TransitionType.Expo).SetEase(Tween.EaseType.Out);
+        tw.TweenProperty(burst, "modulate:a", 0.0f, 0.18f);
+        tw.Chain().TweenCallback(Callable.From(() => burst.QueueFree()));
+    }
+
+    private void _SpawnShockwave(Vector2 pos)
+    {
+        const int seg = 20;
+        var ring = new Node2D();
+        ring.Position = pos;
+        _worldRoot.AddChild(ring);
+
+        var line = new Line2D { Width = 3.0f, DefaultColor = new Color(0.6f, 0.85f, 1.0f, 0.85f) };
+        for (int i = 0; i <= seg; i++)
+        {
+            float a = i * Mathf.Tau / seg;
+            line.AddPoint(new Vector2(Mathf.Cos(a) * 12f, Mathf.Sin(a) * 12f));
+        }
+        ring.AddChild(line);
+
+        var tw = CreateTween();
+        tw.SetParallel(true);
+        tw.TweenProperty(ring, "scale", new Vector2(5.5f, 5.5f), 0.28f)
+            .SetTrans(Tween.TransitionType.Expo).SetEase(Tween.EaseType.Out);
+        tw.TweenProperty(ring, "modulate:a", 0.0f, 0.28f);
+        tw.Chain().TweenCallback(Callable.From(() => ring.QueueFree()));
+    }
+
+    private void _ShowFightText(string text, Color color, double duration)
+    {
+        if (!IsInstanceValid(_fightText)) return;
+        _fightText.Text     = text;
+        _fightText.Scale    = new Vector2(1.8f, 1.8f);
+        _fightText.Modulate = color with { A = 0f };
+        _fightText.Visible  = true;
+
+        var tw = CreateTween();
+        tw.SetParallel(true);
+        tw.TweenProperty(_fightText, "modulate:a", 1.0f, 0.14f);
+        tw.TweenProperty(_fightText, "scale", Vector2.One, 0.22f)
+            .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+
+        GetTree().CreateTimer(duration).Timeout += () =>
+        {
+            if (!IsInstanceValid(_fightText)) return;
+            var fadeTw = CreateTween();
+            fadeTw.TweenProperty(_fightText, "modulate:a", 0.0f, 0.35f);
+        };
     }
 
     private void _BuildSpeedLines(Character actor)
@@ -295,24 +470,61 @@ public partial class FightDirector : Node
         ghost.Scale    = actor.Sprite.Scale;
         ghost.Modulate = new Color(0.25f, 0.55f, 1.0f, 0.55f);
         _afterimages.AddChild(ghost);
-
-        const double life = 0.24;
-        _ghosts.Add((ghost, life, life));
+        _ghosts.Add((ghost, 0.24, 0.24));
     }
 
-    private void _TickGhosts(double delta)
+    private void _TickGhosts(double eff)
     {
         for (int i = _ghosts.Count - 1; i >= 0; i--)
         {
             var (s, life, max) = _ghosts[i];
-            double nl = life - delta;
+            double nl = life - eff;
             if (nl <= 0) { s.QueueFree(); _ghosts.RemoveAt(i); continue; }
             s.Modulate = new Color(0.25f, 0.55f, 1.0f, (float)(nl / max) * 0.55f);
             _ghosts[i] = (s, nl, max);
         }
     }
 
-    // ── Scene setup (done in code for reliability) ───────────────────────────
+    // ── Shader setup ────────────────────────────────────────────────────────
+
+    private void _SetupVignette()
+    {
+        var shader = new Shader();
+        shader.Code =
+@"shader_type canvas_item;
+uniform float strength : hint_range(0.0, 3.0) = 0.8;
+void fragment() {
+    vec2 uv = UV - 0.5;
+    float d = dot(uv, uv) * 4.0;
+    COLOR = vec4(0.0, 0.0, 0.0, clamp(d * strength, 0.0, 0.92));
+}";
+        _vigMat = new ShaderMaterial();
+        _vigMat.Shader = shader;
+        _vigMat.SetShaderParameter("strength", 0.8f);
+        _vigRect.Material = _vigMat;
+    }
+
+    private void _SetupChroma()
+    {
+        var shader = new Shader();
+        shader.Code =
+@"shader_type canvas_item;
+uniform sampler2D SCREEN_TEXTURE : hint_screen_texture, filter_linear_mipmap;
+uniform float strength : hint_range(0.0, 0.05) = 0.0;
+void fragment() {
+    vec2 uv = SCREEN_UV;
+    float r = texture(SCREEN_TEXTURE, uv + vec2(strength, 0.0)).r;
+    float g = texture(SCREEN_TEXTURE, uv).g;
+    float b = texture(SCREEN_TEXTURE, uv - vec2(strength, 0.0)).b;
+    COLOR = vec4(r, g, b, 1.0);
+}";
+        _chromaMat = new ShaderMaterial();
+        _chromaMat.Shader = shader;
+        _chromaMat.SetShaderParameter("strength", 0.0f);
+        _chromaRect.Material = _chromaMat;
+    }
+
+    // ── Scene setup ─────────────────────────────────────────────────────────
 
     private void _BuildStarfield()
     {
@@ -332,28 +544,27 @@ public partial class FightDirector : Node
 
     private void _ConfigureSparks()
     {
-        _hitSparks.Amount          = 30;
-        _hitSparks.Lifetime        = 0.48f;
-        _hitSparks.OneShot         = true;
-        _hitSparks.Explosiveness   = 0.92f;
-        _hitSparks.Randomness      = 0.55f;
-        _hitSparks.EmissionShape   = CPUParticles2D.EmissionShapeEnum.Point;
-        _hitSparks.Direction       = new Vector2(0, -1);
-        _hitSparks.Spread          = 180f;
-        _hitSparks.Gravity         = new Vector2(0, 320f);
-        _hitSparks.InitialVelocityMin = 70f;
-        _hitSparks.InitialVelocityMax = 240f;
-        _hitSparks.ScaleAmountMin  = 3f;
-        _hitSparks.ScaleAmountMax  = 8f;
-        _hitSparks.Color           = new Color(1.0f, 0.82f, 0.22f, 1f);
-        _hitSparks.Emitting        = false;
+        _hitSparks.Amount             = 35;
+        _hitSparks.Lifetime           = 0.50f;
+        _hitSparks.OneShot            = true;
+        _hitSparks.Explosiveness      = 0.92f;
+        _hitSparks.Randomness         = 0.55f;
+        _hitSparks.EmissionShape      = CPUParticles2D.EmissionShapeEnum.Point;
+        _hitSparks.Direction          = new Vector2(0, -1);
+        _hitSparks.Spread             = 180f;
+        _hitSparks.Gravity            = new Vector2(0, 320f);
+        _hitSparks.InitialVelocityMin = 80f;
+        _hitSparks.InitialVelocityMax = 260f;
+        _hitSparks.ScaleAmountMin     = 3f;
+        _hitSparks.ScaleAmountMax     = 9f;
+        _hitSparks.Color              = new Color(1.0f, 0.82f, 0.22f, 1f);
+        _hitSparks.Emitting           = false;
     }
 
     private void _BuildGroundGrid()
     {
         const int vx = 480, vy = 320;
 
-        // Horizontal parallels — exponential spacing for perspective
         for (int i = 1; i <= 8; i++)
         {
             float t = (float)i / 8f;
@@ -366,7 +577,6 @@ public partial class FightDirector : Node
             _groundLines.AddChild(h);
         }
 
-        // Converging vertical lines
         for (int i = -10; i <= 10; i++)
         {
             float gx = vx + i * 52f;

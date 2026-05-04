@@ -123,8 +123,16 @@ vertical_alignment = 1
 theme_override_font_sizes/font_size = 64
 visible = false
 
+[node name="ScanlineLayer" type="CanvasLayer" parent="."]
+layer = 4
+
+[node name="Scanlines" type="ColorRect" parent="ScanlineLayer"]
+offset_right = 960.0
+offset_bottom = 540.0
+mouse_filter = 2
+
 [node name="VignetteLayer" type="CanvasLayer" parent="."]
-layer = 2
+layer = 5
 
 [node name="Vignette" type="ColorRect" parent="VignetteLayer"]
 offset_right = 960.0
@@ -132,7 +140,7 @@ offset_bottom = 540.0
 mouse_filter = 2
 
 [node name="ChromaLayer" type="CanvasLayer" parent="."]
-layer = 3
+layer = 6
 
 [node name="Chroma" type="ColorRect" parent="ChromaLayer"]
 offset_right = 960.0

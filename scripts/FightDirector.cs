@@ -64,6 +64,12 @@ public partial class FightDirector : Node
     // Parallax layers
     private Polygon2D _mountainBack, _mountainFront;
 
+    // Sky + scanline
+    private ColorRect      _sky;
+    private ColorRect      _scanlineRect;
+    private ShaderMaterial _scanlineMat;
+    private Color          _skyBaseColor = new(0.04f, 0.02f, 0.10f, 1f);
+
     // Dust / landing particles
     private CPUParticles2D _dustParticles;
 
@@ -107,12 +113,15 @@ public partial class FightDirector : Node
         _horizonGlow   = GetNode<ColorRect>("WorldRoot/HorizonGlow");
         _mountainBack  = GetNode<Polygon2D>("WorldRoot/MountainBack");
         _mountainFront = GetNode<Polygon2D>("WorldRoot/MountainFront");
+        _sky           = GetNode<ColorRect>("WorldRoot/Sky");
+        _scanlineRect  = GetNode<ColorRect>("ScanlineLayer/Scanlines");
 
         _flashRect.Visible = false;
         _camera.Position   = _camTarget;
 
         _SetupVignette();
         _SetupChroma();
+        _SetupScanlines();
         _SetupHPBarStyles();
         _BuildStarfield();
         _ConfigureSparks();
@@ -326,12 +335,18 @@ public partial class FightDirector : Node
                 break;
 
             case "dash":
+            {
                 if (beat.Actor == "yaniv") _yanivGhosts = 10;
                 else                       _orGhosts    = 10;
                 _BuildSpeedLines(actor);
                 _SpawnDust(actor.Position + new Vector2(0, 10));
-                _camTarget = new Vector2(mid.X, 290f);
+                // Lead camera toward dash destination
+                float leadX = float.IsNaN(beat.TargetX)
+                    ? mid.X
+                    : Mathf.Lerp(mid.X, beat.TargetX, 0.35f);
+                _camTarget = new Vector2(leadX, 290f);
                 break;
+            }
 
             case "attack":
             {
@@ -374,6 +389,7 @@ public partial class FightDirector : Node
                 _vigTarget      = 1.5f;
                 _timeMultTarget = 0.42;
                 _ScheduleSlowMoEnd(1.1);
+                _FlashSky(new Color(0.06f, 0.04f, 0.22f, 1f), 0.8);
                 break;
             }
 
@@ -398,6 +414,7 @@ public partial class FightDirector : Node
                 _ScheduleSlowMoEnd(2.8);
                 _ShowFightText("K.O.!", new Color(1f, 0.15f, 0.15f), 2.5);
                 _DeathCinematic(actor.Position);
+                _FlashSky(new Color(0.18f, 0.02f, 0.02f, 1f), 1.2);
                 break;
             }
 
@@ -409,6 +426,7 @@ public partial class FightDirector : Node
                 actor.FlashPower();
                 actor.StartChargeGlow(new Color(1.3f, 1.1f, 0.25f));
                 actor.SetAuraIntensity(0.6f, new Color(1.0f, 0.9f, 0.3f));
+                _ShowFightText($"{beat.Actor.ToUpper()} WINS!", new Color(1f, 0.85f, 0.1f), 3.5);
                 break;
         }
     }
@@ -658,6 +676,32 @@ void fragment() {
         float ratio = ch.HP / 100.0f;
         var   color = Color.FromHsv(ratio * 0.55f, 0.85f, 1.0f);
         ch.SetAuraIntensity(Mathf.Lerp(0.05f, 0.0f, ratio), color);
+    }
+
+    private void _SetupScanlines()
+    {
+        var shader = new Shader();
+        shader.Code =
+@"shader_type canvas_item;
+uniform float spacing : hint_range(2.0, 8.0) = 3.0;
+uniform float alpha   : hint_range(0.0, 0.3)  = 0.10;
+void fragment() {
+    float l = mod(FRAGCOORD.y, spacing);
+    COLOR = vec4(0.0, 0.0, 0.0, step(spacing - 1.0, l) * alpha);
+}";
+        _scanlineMat = new ShaderMaterial();
+        _scanlineMat.Shader = shader;
+        _scanlineMat.SetShaderParameter("spacing", 3.0f);
+        _scanlineMat.SetShaderParameter("alpha", 0.10f);
+        _scanlineRect.Material = _scanlineMat;
+    }
+
+    private void _FlashSky(Color targetColor, double returnDur)
+    {
+        var tw = CreateTween();
+        tw.TweenProperty(_sky, "color", targetColor, 0.12f);
+        tw.TweenProperty(_sky, "color", _skyBaseColor, (float)returnDur)
+            .SetTrans(Tween.TransitionType.Expo).SetEase(Tween.EaseType.Out);
     }
 
     private void _SetupHPBarStyles()

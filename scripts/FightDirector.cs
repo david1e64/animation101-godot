@@ -213,10 +213,11 @@ public partial class FightDirector : Node
         float z = Mathf.Lerp(_camera.Zoom.X, _camZoomTarget, (float)(delta * 3.5f));
         _camera.Zoom = new Vector2(z, z);
 
-        // Parallax — mountains shift opposite to camera
+        // Parallax — mountains and stars shift opposite to camera
         float camOff = _camera.Position.X - 480f;
         _mountainBack.Position  = new Vector2(-camOff * 0.12f, 0f);
         _mountainFront.Position = new Vector2(-camOff * 0.24f, 0f);
+        _stars.Position         = new Vector2(-camOff * 0.05f, 0f);
 
         // Ghosts
         if (_tick % 2 == 0)
@@ -416,6 +417,7 @@ public partial class FightDirector : Node
                 _SpawnDebris(pos);
                 _SpawnImpactBurst(pos);
                 _SpawnShockwave(pos);
+                _SpawnGroundRing(actor.Position + new Vector2(0, 15));
                 actor.FlashDamage();
                 actor.StopChargeGlow();
                 actor.SetAuraIntensity(1.0f, new Color(1f, 0.2f, 0.1f));
@@ -754,6 +756,41 @@ void fragment() {
         _orHPStyle    = new StyleBoxFlat { BgColor = new Color(0.2f, 0.85f, 0.25f) };
         _yanivHP.AddThemeStyleboxOverride("fill", _yanivHPStyle);
         _orHP.AddThemeStyleboxOverride("fill", _orHPStyle);
+
+        // Background track with border
+        var bgStyle = new StyleBoxFlat
+        {
+            BgColor          = new Color(0.05f, 0.04f, 0.10f, 0.9f),
+            BorderWidthBottom = 1, BorderWidthTop = 1,
+            BorderWidthLeft  = 1, BorderWidthRight = 1,
+            BorderColor      = new Color(0.38f, 0.32f, 0.55f, 0.9f),
+        };
+        _yanivHP.AddThemeStyleboxOverride("background", bgStyle);
+        _orHP.AddThemeStyleboxOverride("background", bgStyle);
+    }
+
+    private void _SpawnGroundRing(Vector2 footPos)
+    {
+        const int seg = 20;
+        var ring = new Node2D();
+        ring.Position = footPos;
+        ring.Scale    = new Vector2(1f, 0.18f);  // flat ellipse on ground plane
+        _worldRoot.AddChild(ring);
+
+        var line = new Line2D { Width = 4.0f, DefaultColor = new Color(1.0f, 0.45f, 0.1f, 0.9f) };
+        for (int i = 0; i <= seg; i++)
+        {
+            float a = i * Mathf.Tau / seg;
+            line.AddPoint(new Vector2(Mathf.Cos(a) * 14f, Mathf.Sin(a) * 14f));
+        }
+        ring.AddChild(line);
+
+        var tw = CreateTween();
+        tw.SetParallel(true);
+        tw.TweenProperty(ring, "scale", new Vector2(9f, 1.6f), 0.45f)
+            .SetTrans(Tween.TransitionType.Expo).SetEase(Tween.EaseType.Out);
+        tw.TweenProperty(ring, "modulate:a", 0.0f, 0.45f);
+        tw.Chain().TweenCallback(Callable.From(() => ring.QueueFree()));
     }
 
     private static Color _HPColor(float ratio) =>

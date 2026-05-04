@@ -51,6 +51,13 @@ public partial class FightDirector : Node
     private float _chromaStrength = 0.0f;
     private float _chromaTarget   = 0.0f;
 
+    // HP drain animation
+    private float _yanivVisHP = 100f, _orVisHP = 100f;
+    private int   _prevYanivHP = 100, _prevOrHP = 100;
+
+    // Horizon glow
+    private ColorRect _horizonGlow;
+
     // Recording
     private int  _frameNum = 0;
     private bool _encDone  = false;
@@ -75,6 +82,7 @@ public partial class FightDirector : Node
         _vigRect     = GetNode<ColorRect>("VignetteLayer/Vignette");
         _chromaRect  = GetNode<ColorRect>("ChromaLayer/Chroma");
         _fightText   = GetNode<Label>("HUD/FightText");
+        _horizonGlow = GetNode<ColorRect>("WorldRoot/HorizonGlow");
 
         _flashRect.Visible = false;
         _camera.Position   = _camTarget;
@@ -84,6 +92,7 @@ public partial class FightDirector : Node
         _BuildStarfield();
         _ConfigureSparks();
         _BuildGroundGrid();
+        _BuildHorizonPulse();
 
         _beats = FightScript.YanivVsOr();
 
@@ -179,9 +188,16 @@ public partial class FightDirector : Node
         _vigMat.SetShaderParameter("strength", _vigStrength);
         _chromaMat.SetShaderParameter("strength", _chromaStrength);
 
-        // HUD
-        _yanivHP.Value = _yaniv.HP;
-        _orHP.Value    = _or.HP;
+        // HP drain animation + flash on damage
+        if (_yaniv.HP < _prevYanivHP) _FlashHPBar(_yanivHP);
+        if (_or.HP    < _prevOrHP)    _FlashHPBar(_orHP);
+        _prevYanivHP = _yaniv.HP;
+        _prevOrHP    = _or.HP;
+
+        _yanivVisHP = Mathf.Lerp(_yanivVisHP, _yaniv.HP, (float)(delta * 2.8f));
+        _orVisHP    = Mathf.Lerp(_orVisHP,    _or.HP,    (float)(delta * 2.8f));
+        _yanivHP.Value = _yanivVisHP;
+        _orHP.Value    = _orVisHP;
 
         if (Recording) _SaveFrame();
     }
@@ -225,6 +241,8 @@ public partial class FightDirector : Node
                 _camTarget      = new Vector2(mid.X, 290f);
                 _vigTarget      = 0.8f;
                 _timeMultTarget = 1.0;
+                actor.StopChargeGlow();
+                actor.SetAuraIntensity(0.0f, new Color(0.4f, 0.6f, 1.0f));
                 break;
 
             case "idle":
@@ -232,6 +250,8 @@ public partial class FightDirector : Node
                 _camTarget      = _camTarget.Lerp(new Vector2(mid.X, 290f), 0.15f);
                 _vigTarget      = Mathf.Lerp(_vigTarget, 0.8f, 0.2f);
                 _timeMultTarget = 1.0;
+                actor.StopChargeGlow();
+                actor.SetAuraIntensity(0.0f, new Color(0.4f, 0.6f, 1.0f));
                 break;
 
             case "dash":
@@ -274,6 +294,8 @@ public partial class FightDirector : Node
                 _SpawnShockwave(actor.Position + new Vector2(0, -70));
                 _BuildSpeedLines(actor);
                 actor.FlashPower();
+                actor.StartChargeGlow(new Color(1.4f, 1.2f, 0.3f));
+                actor.SetAuraIntensity(0.85f, new Color(1.0f, 0.85f, 0.2f));
                 _camTarget      = actor.Position with { Y = 290f };
                 _camZoomTarget  = 1.35f;
                 _vigTarget      = 1.5f;
@@ -292,6 +314,8 @@ public partial class FightDirector : Node
                 _SpawnImpactBurst(pos);
                 _SpawnShockwave(pos);
                 actor.FlashDamage();
+                actor.StopChargeGlow();
+                actor.SetAuraIntensity(1.0f, new Color(1f, 0.2f, 0.1f));
                 _camTarget      = actor.Position with { Y = 290f };
                 _camZoomTarget  = 1.55f;
                 _vigTarget      = 2.0f;
@@ -308,6 +332,8 @@ public partial class FightDirector : Node
                 _vigTarget     = 0.9f;
                 _chromaTarget  = 0.0f;
                 actor.FlashPower();
+                actor.StartChargeGlow(new Color(1.3f, 1.1f, 0.25f));
+                actor.SetAuraIntensity(0.6f, new Color(1.0f, 0.9f, 0.3f));
                 break;
         }
     }
@@ -524,7 +550,24 @@ void fragment() {
         _chromaRect.Material = _chromaMat;
     }
 
+    private void _FlashHPBar(ProgressBar bar)
+    {
+        bar.Modulate = new Color(2.2f, 2.2f, 2.2f);
+        var tw = CreateTween();
+        tw.TweenProperty(bar, "modulate", Colors.White, 0.35f)
+            .SetTrans(Tween.TransitionType.Expo).SetEase(Tween.EaseType.Out);
+    }
+
     // ── Scene setup ─────────────────────────────────────────────────────────
+
+    private void _BuildHorizonPulse()
+    {
+        var tw = CreateTween().SetLoops();
+        tw.TweenProperty(_horizonGlow, "color:a", 0.88f, 1.6f)
+            .SetTrans(Tween.TransitionType.Sine);
+        tw.TweenProperty(_horizonGlow, "color:a", 0.42f, 1.6f)
+            .SetTrans(Tween.TransitionType.Sine);
+    }
 
     private void _BuildStarfield()
     {

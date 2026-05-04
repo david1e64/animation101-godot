@@ -58,6 +58,15 @@ public partial class FightDirector : Node
     // Horizon glow
     private ColorRect _horizonGlow;
 
+    // Ground shadows (drop circles under characters)
+    private Polygon2D _yanivShadow, _orShadow;
+
+    // Death debris second emitter
+    private CPUParticles2D _deathDebris;
+
+    // Twinkling stars (subset)
+    private readonly List<(ColorRect rect, float bri, float freq, float phase)> _twinklers = new();
+
     // Recording
     private int  _frameNum = 0;
     private bool _encDone  = false;
@@ -91,7 +100,9 @@ public partial class FightDirector : Node
         _SetupChroma();
         _BuildStarfield();
         _ConfigureSparks();
+        _ConfigureDebris();
         _BuildGroundGrid();
+        _BuildGroundShadows();
         _BuildHorizonPulse();
 
         _beats = FightScript.YanivVsOr();
@@ -181,6 +192,19 @@ public partial class FightDirector : Node
             if (_orGhosts    > 0) { _orGhosts--;    _SpawnGhost(_or);    }
         }
         _TickGhosts(eff);
+
+        // Ground shadow position tracking
+        const float groundY = 315f;
+        _yanivShadow.Position = new Vector2(_yaniv.Position.X, groundY);
+        _orShadow.Position    = new Vector2(_or.Position.X,    groundY);
+
+        // Star twinkle
+        for (int i = 0; i < _twinklers.Count; i++)
+        {
+            var (rect, bri, freq, phase) = _twinklers[i];
+            float a = bri * (0.65f + 0.35f * Mathf.Sin((float)_elapsed * freq + phase));
+            rect.Color = new Color(bri, bri, bri * 0.92f, a);
+        }
 
         // Shader lerps
         _vigStrength    = Mathf.Lerp(_vigStrength,    _vigTarget,    (float)(delta * 3.5f));
@@ -311,6 +335,7 @@ public partial class FightDirector : Node
                 _TriggerShake(24, 0.5);
                 _TriggerFreeze(0.10);
                 _SpawnSparks(pos);
+                _SpawnDebris(pos);
                 _SpawnImpactBurst(pos);
                 _SpawnShockwave(pos);
                 actor.FlashDamage();
@@ -323,6 +348,7 @@ public partial class FightDirector : Node
                 _timeMultTarget = 0.22;
                 _ScheduleSlowMoEnd(2.8);
                 _ShowFightText("K.O.!", new Color(1f, 0.15f, 0.15f), 2.5);
+                _DeathCinematic(actor.Position);
                 break;
             }
 
@@ -550,6 +576,18 @@ void fragment() {
         _chromaRect.Material = _chromaMat;
     }
 
+    private async void _DeathCinematic(Vector2 dyingPos)
+    {
+        // Already at 1.55x. Push tighter after 0.9s
+        await ToSignal(GetTree().CreateTimer(0.9), SceneTreeTimer.SignalName.Timeout);
+        _camZoomTarget = 1.88f;
+        _camTarget     = dyingPos with { Y = 290f };
+        // Hold for dramatic pause, then pull back for victory
+        await ToSignal(GetTree().CreateTimer(2.0), SceneTreeTimer.SignalName.Timeout);
+        _camZoomTarget = 1.0f;
+        _camTarget     = new Vector2(480f, 290f);
+    }
+
     private void _FlashHPBar(ProgressBar bar)
     {
         bar.Modulate = new Color(2.2f, 2.2f, 2.2f);
@@ -559,6 +597,33 @@ void fragment() {
     }
 
     // ── Scene setup ─────────────────────────────────────────────────────────
+
+    private void _SpawnDebris(Vector2 pos)
+    {
+        _deathDebris.GlobalPosition = pos;
+        _deathDebris.Restart();
+    }
+
+    private void _BuildGroundShadows()
+    {
+        _yanivShadow = _MakeShadowEllipse();
+        _orShadow    = _MakeShadowEllipse();
+        _worldRoot.AddChild(_yanivShadow);
+        _worldRoot.AddChild(_orShadow);
+    }
+
+    private static Polygon2D _MakeShadowEllipse()
+    {
+        const int pts = 20;
+        const float rx = 48f, ry = 9f;
+        var points = new Vector2[pts];
+        for (int i = 0; i < pts; i++)
+        {
+            float a = i * Mathf.Tau / pts;
+            points[i] = new Vector2(Mathf.Cos(a) * rx, Mathf.Sin(a) * ry);
+        }
+        return new Polygon2D { Polygon = points, Color = new Color(0f, 0f, 0f, 0.28f) };
+    }
 
     private void _BuildHorizonPulse()
     {
@@ -582,7 +647,39 @@ void fragment() {
             star.Position = new Vector2(rng.RandfRange(0, 960), rng.RandfRange(0, 308));
             star.Color    = new Color(bri, bri, bri * 0.92f, bri);
             _stars.AddChild(star);
+
+            // Register ~40 bright stars as twinklers
+            if (i < 40 && bri > 0.6f)
+            {
+                _twinklers.Add((
+                    star,
+                    bri,
+                    rng.RandfRange(0.6f, 2.2f),  // twinkle frequency
+                    rng.RandfRange(0f, Mathf.Tau) // phase offset
+                ));
+            }
         }
+    }
+
+    private void _ConfigureDebris()
+    {
+        _deathDebris = new CPUParticles2D();
+        _deathDebris.Amount               = 22;
+        _deathDebris.Lifetime             = 1.0f;
+        _deathDebris.OneShot              = true;
+        _deathDebris.Explosiveness        = 0.85f;
+        _deathDebris.Randomness           = 0.7f;
+        _deathDebris.EmissionShape        = CPUParticles2D.EmissionShapeEnum.Point;
+        _deathDebris.Direction            = new Vector2(0, -1);
+        _deathDebris.Spread               = 160f;
+        _deathDebris.Gravity              = new Vector2(0, 400f);
+        _deathDebris.InitialVelocityMin   = 40f;
+        _deathDebris.InitialVelocityMax   = 160f;
+        _deathDebris.ScaleAmountMin       = 5f;
+        _deathDebris.ScaleAmountMax       = 16f;
+        _deathDebris.Color                = new Color(0.95f, 0.35f, 0.1f, 1f);
+        _deathDebris.Emitting             = false;
+        _worldRoot.AddChild(_deathDebris);
     }
 
     private void _ConfigureSparks()

@@ -58,6 +58,9 @@ public partial class FightDirector : Node
     // Horizon glow
     private ColorRect _horizonGlow;
 
+    // HP bar styling (color gradient)
+    private StyleBoxFlat _yanivHPStyle, _orHPStyle;
+
     // Ground shadows (drop circles under characters)
     private Polygon2D _yanivShadow, _orShadow;
 
@@ -98,6 +101,7 @@ public partial class FightDirector : Node
 
         _SetupVignette();
         _SetupChroma();
+        _SetupHPBarStyles();
         _BuildStarfield();
         _ConfigureSparks();
         _ConfigureDebris();
@@ -113,7 +117,9 @@ public partial class FightDirector : Node
             Engine.MaxFps = FPS;
         }
 
-        GetTree().CreateTimer(0.4).Timeout += () =>
+        GetTree().CreateTimer(0.25).Timeout += () =>
+            _ShowFightText("ROUND 1", new Color(0.85f, 0.88f, 1.0f), 1.4);
+        GetTree().CreateTimer(2.0).Timeout += () =>
             _ShowFightText("FIGHT!", new Color(1f, 0.85f, 0.1f), 1.2);
     }
 
@@ -206,8 +212,19 @@ public partial class FightDirector : Node
             rect.Color = new Color(bri, bri, bri * 0.92f, a);
         }
 
-        // Shader lerps
-        _vigStrength    = Mathf.Lerp(_vigStrength,    _vigTarget,    (float)(delta * 3.5f));
+        // Distance-based staredown zoom — tighten when fighters face each other close
+        float dist = Mathf.Abs(_yaniv.Position.X - _or.Position.X);
+        if (dist < 260f && _camZoomTarget < 1.15f)
+        {
+            float zoomIn = Mathf.Lerp(1.0f, 1.18f, 1.0f - dist / 260f);
+            _camZoomTarget = Mathf.Lerp(_camZoomTarget, zoomIn, (float)(delta * 0.6f));
+        }
+
+        // Vignette: base target + HP tension bonus
+        float lowestHP = Mathf.Min(_yaniv.HP, _or.HP) / 100.0f;
+        float hpBonus  = Mathf.Lerp(0.4f, 0.0f, lowestHP);
+        float finalVig = Mathf.Max(_vigTarget, 0.78f + hpBonus);
+        _vigStrength    = Mathf.Lerp(_vigStrength,    finalVig,     (float)(delta * 3.5f));
         _chromaStrength = Mathf.Lerp(_chromaStrength, _chromaTarget, (float)(delta * 5.0f));
         _vigMat.SetShaderParameter("strength", _vigStrength);
         _chromaMat.SetShaderParameter("strength", _chromaStrength);
@@ -222,6 +239,10 @@ public partial class FightDirector : Node
         _orVisHP    = Mathf.Lerp(_orVisHP,    _or.HP,    (float)(delta * 2.8f));
         _yanivHP.Value = _yanivVisHP;
         _orHP.Value    = _orVisHP;
+
+        // HP bar color gradient: green → yellow → red
+        _yanivHPStyle.BgColor = _HPColor(_yanivVisHP / 100f);
+        _orHPStyle.BgColor    = _HPColor(_orVisHP    / 100f);
 
         if (Recording) _SaveFrame();
     }
@@ -575,6 +596,17 @@ void fragment() {
         _chromaMat.SetShaderParameter("strength", 0.0f);
         _chromaRect.Material = _chromaMat;
     }
+
+    private void _SetupHPBarStyles()
+    {
+        _yanivHPStyle = new StyleBoxFlat { BgColor = new Color(0.2f, 0.85f, 0.25f) };
+        _orHPStyle    = new StyleBoxFlat { BgColor = new Color(0.2f, 0.85f, 0.25f) };
+        _yanivHP.AddThemeStyleboxOverride("fill", _yanivHPStyle);
+        _orHP.AddThemeStyleboxOverride("fill", _orHPStyle);
+    }
+
+    private static Color _HPColor(float ratio) =>
+        Color.FromHsv(ratio * 0.33f, 0.88f, 0.92f);
 
     private async void _DeathCinematic(Vector2 dyingPos)
     {

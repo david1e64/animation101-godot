@@ -289,7 +289,8 @@ public partial class FightDirector : Node
         var actor  = beat.Actor == "yaniv" ? _yaniv : _or;
         var target = beat.Actor == "yaniv" ? _or    : _yaniv;
 
-        if (beat.Action != "move")
+        // "tension" and "move" are director-only — no animation
+        if (beat.Action != "move" && beat.Action != "tension")
             actor.Play(beat.Action);
 
         // HP: "hit"/"death" damage the actor; everything else damages the target
@@ -316,6 +317,14 @@ public partial class FightDirector : Node
 
         switch (beat.Action)
         {
+            case "tension":
+                // Power aura pulse from the character — no movement
+                _SpawnShockwave(actor.Position + new Vector2(0, -70));
+                actor.SetAuraIntensity(0.5f, new Color(0.8f, 0.5f, 1.0f));
+                _vigTarget     = Mathf.Max(_vigTarget, 1.2f);
+                _camZoomTarget = Mathf.Min(_camZoomTarget + 0.04f, 1.22f);
+                break;
+
             case "walk":
                 _camZoomTarget  = 1.0f;
                 _camTarget      = new Vector2(mid.X, 290f);
@@ -390,6 +399,10 @@ public partial class FightDirector : Node
                 _timeMultTarget = 0.42;
                 _ScheduleSlowMoEnd(1.1);
                 _FlashSky(new Color(0.06f, 0.04f, 0.22f, 1f), 0.8);
+                // Jump + land tween for dramatic feel
+                _CharacterJump(actor, 28f, 0.12);
+                // Sequential power rings
+                _SpawnPowerRings(actor.Position + new Vector2(0, -70));
                 break;
             }
 
@@ -427,6 +440,7 @@ public partial class FightDirector : Node
                 actor.StartChargeGlow(new Color(1.3f, 1.1f, 0.25f));
                 actor.SetAuraIntensity(0.6f, new Color(1.0f, 0.9f, 0.3f));
                 _ShowFightText($"{beat.Actor.ToUpper()} WINS!", new Color(1f, 0.85f, 0.1f), 3.5);
+                _ScheduleFightEndFade(5.5);
                 break;
         }
     }
@@ -641,6 +655,36 @@ void fragment() {
         _chromaMat.Shader = shader;
         _chromaMat.SetShaderParameter("strength", 0.0f);
         _chromaRect.Material = _chromaMat;
+    }
+
+    private void _CharacterJump(Character ch, float height, double duration)
+    {
+        float origY = ch.Position.Y;
+        var tw = CreateTween();
+        tw.TweenProperty(ch, "position:y", origY - height, (float)(duration * 0.4))
+            .SetTrans(Tween.TransitionType.Expo).SetEase(Tween.EaseType.Out);
+        tw.TweenProperty(ch, "position:y", origY, (float)(duration * 0.6))
+            .SetTrans(Tween.TransitionType.Bounce).SetEase(Tween.EaseType.Out);
+    }
+
+    private void _SpawnPowerRings(Vector2 pos)
+    {
+        var tw = CreateTween();
+        tw.TweenCallback(Callable.From(() => _SpawnShockwave(pos)));
+        tw.TweenInterval(0.20f);
+        tw.TweenCallback(Callable.From(() => _SpawnShockwave(pos)));
+        tw.TweenInterval(0.20f);
+        tw.TweenCallback(Callable.From(() => _SpawnShockwave(pos)));
+    }
+
+    private async void _ScheduleFightEndFade(double delay)
+    {
+        await ToSignal(GetTree().CreateTimer(delay), SceneTreeTimer.SignalName.Timeout);
+        _flashRect.Color   = new Color(0f, 0f, 0f, 0f);
+        _flashRect.Visible = true;
+        var tw = CreateTween();
+        tw.TweenProperty(_flashRect, "color:a", 1.0f, 2.5f)
+            .SetTrans(Tween.TransitionType.Sine);
     }
 
     private void _SpawnDust(Vector2 pos)

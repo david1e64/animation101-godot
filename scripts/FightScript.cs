@@ -78,9 +78,9 @@ public static class FightScript
         new(18.6, "or",    "walk",   TargetX: 580, MoveDur: 1.1),
         new(19.7, "yaniv", "idle"),
         new(19.7, "or",    "idle"),
-        // Silence — let the camera drift for 2s before the final burst
-        new(21.4, "yaniv", "idle"),  // tension hold
-        new(21.4, "or",    "idle"),
+        // Silence — director handles distance-based zoom here
+        new(20.4, "yaniv", "tension"),   // vignette tightens, camera creeps in
+        new(21.2, "or",    "tension"),   // or responds — second pulse
 
         // ── Phase 7: Yaniv's final combo (21.5–26s) ───────────────────────
         new(21.8, "yaniv", "dash",   TargetX: 452, MoveDur: 0.10),
